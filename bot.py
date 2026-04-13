@@ -1,101 +1,158 @@
-import asyncio
 import requests
 import time
-from telethon import TelegramClient, events
-from telethon.tl.functions.channels import GetChatInviteRequestsRequest
-from telethon.tl.functions.messages import HideChatJoinRequestRequest
-from telethon.tl.types import InputPeerChannel
 
-API_ID       = 28687552
-API_HASH     = "1abf9a58d0c22f62437bec89bd6b27a3"
 BOT_TOKEN = "8631457299:AAGpZIld3nTruS4xgpWWflo1oMayajl74dI"
 OWNER_ID  = 8493646452
-GROUP_USERNAME = "username_группы"  # без @
-
-bot_url = f"https://api.telegram.org/bot{BOT_TOKEN}"
-group_id = None
+url = f"https://api.telegram.org/bot{BOT_TOKEN}"
+group_id  = None
 
 def send_message(chat_id, text):
-    requests.post(f"{bot_url}/sendMessage", json={"chat_id": chat_id, "text": text})
+    requests.post(f"{url}/sendMessage", json={"chat_id": chat_id, "text": text})
 
-async def decline_all_old(client, chat_id):
-    entity = await client.get_entity(GROUP_USERNAME)
-    peer   = InputPeerChannel(entity.id, entity.access_hash)
+def delete_webhook():
+    requests.get(f"{url}/deleteWebhook")
+    print("Webhook удалён")
 
+def decline_requests_now(owner_chat_id):
+    if not group_id:
+        send_message(owner_chat_id, "❌ Сначала: /setgroup -100xxxxxxxxxx")
+        return
+
+    send_message(owner_chat_id, "⏳ Удаляю все заявки...")
     declined = 0
+    last_user_id = None
+
     while True:
-        result = await client(GetChatInviteRequestsRequest(
-            peer=peer,
-            limit=100,
-            offset_date=None,
-            offset_user=None,
-        ))
-        if not result.users:
+        params = {"chat_id": group_id, "limit": 100}
+        if last_user_id:
+            params["offset_user_id"] = last_user_id
+
+        res = requests.get(f"{url}/getChatJoinRequests", params=params)
+        data = res.json()
+        print("Ответ getChatJoinRequests:", data)
+
+        if not data.get("ok"):
+            # Метод не поддерживается — пробуем через getUpdates
+            send_message(owner_chat_id, f"❌ Ошибка: {data.get('description')}\nМетод не поддерживается Bot API.")
+            return
+
+        results = data.get("result", [])
+        if not results:
             break
 
-        for user in result.users:
-            await client(HideChatJoinRequestRequest(
-                peer=peer,
-                user_id=user.id,
-                approved=False,
-            ))
-            print(f"Отклонён: {user.id}")
-            declined += 1
-            await asyncio.sleep(0.3)
+        for req in results:
+            uid = req["from"]["id"]
+            r = requests.post(f"{url}/declineChatJoinRequest", json={
+                "chat_id": group_id,
+                "user_id": uid,
+            })
+            if r.json().get("ok"):
+                declined += 1
+                print(f"Отклонён: {uid}")
+            last_user_id = uid
+            time.sleep(0.3)
 
-    send_message(chat_id, f"✅ Отклонено всего заявок: {declined}")
+        if len(results) < 100:
+            break
 
-async def main():
-    client = TelegramClient("session", API_ID, API_HASH)
-    await client.start()
+    send_message(owner_chat_id, f"✅ Отклонено заявок: {declined}")
 
-    offset = None
-    while True:
-        try:
-            params = {
-                "timeout": 10,
-                "allowed_updates": ["message", "chat_join_request"],
-            }
-            if offset:
-                params["offset"] = offset
+def process_updates(offset):
+    params = {
+        "timeout": 10,
+        "allowed_updates": ["chat_join_request", "message"],
+    }
+    if offset:
+        params["offset"] = offset
 
-            r = requests.get(f"{bot_url}/getUpdates", params=params)
-            updates = r.json().get("result", [])
+    r = requests.get(f"{url}/getUpdates", params=params)
+    data = r.json()
 
-            for update in updates:
-                offset = update["update_id"] + 1
+    if not data.get("ok"):
+        print("Ошибка getUpdates:", data)
+        return offset, 0
 
-                if "message" in update:
-                    msg     = update["message"]
-                    text    = msg.get("text", "")
-                    user_id = msg["from"]["id"]
-                    chat_id = msg["chat"]["id"]
+    updates = data.get("result", [])
+    declined = 0
 
-                    if user_id != OWNER_ID:
-                        send_message(chat_id, "⛔ Нет доступа.")
-                        continue
+    for update in updates:
+        offset = update["update_id"] + 1
 
-                    if text == "/start":
-                        send_message(chat_id, "👋 Привет!\n/decline — удалить ВСЕ заявки включая старые")
+        if "message" in update:
+            msg     = update["message"]
+            text    = msg.get("text", "")
+            user_id = msg["from"]["id"]
+            chat_id = msg["chat"]["id"]
 
-                    elif text == "/decline":
-                        send_message(chat_id, "⏳ Удаляю все заявки включая старые...")
-                        await decline_all_old(client, chat_id)
+            if user_id != OWNER_ID:
+                send_message(chat_id, "⛔ Нет доступа.")
+                continue
 
-                if "chat_join_request" in update:
-                    uid     = update["chat_join_request"]["from"]["id"]
-                    gid     = update["chat_join_request"]["chat"]["id"]
-                    name    = update["chat_join_request"]["from"].get("first_name", "—")
-                    res = requests.post(f"{bot_url}/declineChatJoinRequest", json={
-                        "chat_id": gid,
-                        "user_id": uid,
+            if text == "/start":
+                send_message(chat_id, (
+                    "👋 Привет!\n\n"
+                    "/setgroup -100xxx — указать группу\n"
+                    "/link — ссылка с заявками\n"
+                    "/decline — отклонить все заявки\n\n"
+                    "Новые заявки отклоняются автоматически."
+                ))
+
+            elif text.startswith("/setgroup"):
+                parts = text.split()
+                if len(parts) == 2:
+                    global group_id
+                    group_id = int(parts[1])
+                    send_message(chat_id, f"✅ Группа установлена: {group_id}")
+                else:
+                    send_message(chat_id, "Формат: /setgroup -100xxxxxxxxxx")
+
+            elif text == "/link":
+                if not group_id:
+                    send_message(chat_id, "❌ Сначала: /setgroup -100xxxxxxxxxx")
+                else:
+                    res = requests.post(f"{url}/createChatInviteLink", json={
+                        "chat_id": group_id,
+                        "creates_join_request": True,
                     })
                     if res.json().get("ok"):
-                        print(f"Авто-отклонён: {name} ({uid})")
+                        link = res.json()["result"]["invite_link"]
+                        send_message(chat_id, f"🔗 Ссылка:\n{link}")
+                    else:
+                        send_message(chat_id, f"Ошибка: {res.json()}")
 
-            await asyncio.sleep(2)
-        except Exception as e:
-            print("Ошибка:", e)
-            await asyncio.sleep(5)
+            elif text == "/decline":
+                decline_requests_now(chat_id)
 
-asyncio.run(main())
+        if "chat_join_request" in update:
+            uid  = update["chat_join_request"]["from"]["id"]
+            gid  = update["chat_join_request"]["chat"]["id"]
+            name = update["chat_join_request"]["from"].get("first_name", "—")
+
+            res = requests.post(f"{url}/declineChatJoinRequest", json={
+                "chat_id": gid,
+                "user_id": uid,
+            })
+            if res.json().get("ok"):
+                print(f"Авто-отклонён: {name} ({uid})")
+                declined += 1
+
+            time.sleep(0.3)
+
+    return offset, declined
+
+delete_webhook()
+print("Бот запущен.")
+
+offset = None
+total  = 0
+
+while True:
+    try:
+        offset, count = process_updates(offset)
+        total += count
+        if count:
+            print(f"Отклонено: {count} | Всего: {total}")
+        time.sleep(2)
+    except Exception as e:
+        print("Ошибка:", e)
+        time.sleep(5)
