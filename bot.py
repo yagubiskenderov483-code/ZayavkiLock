@@ -2,7 +2,7 @@ import requests
 import time
 import os
 
-BOT_TOKEN = "твой_токен"
+BOT_TOKEN = "8631457299:AAGpZIld3nTruS4xgpWWflo1oMayajl74dI"
 OWNER_ID  = 8493646452
 url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
