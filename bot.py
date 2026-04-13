@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID   = int(os.getenv("CHAT_ID"))
 url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 def send_message(chat_id, text):
