@@ -7,28 +7,41 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID   = int(os.getenv("CHAT_ID"))
+url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 def decline_all():
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}"
     declined = 0
+    offset = None
 
     while True:
-        r = requests.get(f"{url}/getChatJoinRequests", params={"chat_id": CHAT_ID, "limit": 100})
-        data = r.json()
+        params = {"timeout": 10, "allowed_updates": ["chat_join_request"]}
+        if offset:
+            params["offset"] = offset
 
-        if not data.get("ok") or not data["result"]:
+        r = requests.get(f"{url}/getUpdates", params=params)
+        updates = r.json().get("result", [])
+
+        if not updates:
+            print(f"Новых заявок нет. Отклонено за сессию: {declined}")
             break
 
-        for req in data["result"]:
-            user_id = req["from"]["id"]
-            requests.post(f"{url}/declineChatJoinRequest", json={
-                "chat_id": CHAT_ID,
-                "user_id": user_id,
-            })
-            print(f"Отклонён: {user_id}")
-            declined += 1
-            time.sleep(0.3)
+        for update in updates:
+            offset = update["update_id"] + 1
+            if "chat_join_request" in update:
+                user_id = update["chat_join_request"]["from"]["id"]
+                chat_id = update["chat_join_request"]["chat"]["id"]
 
-    print(f"Готово. Отклонено: {declined}")
+                res = requests.post(f"{url}/declineChatJoinRequest", json={
+                    "chat_id": chat_id,
+                    "user_id": user_id,
+                })
+                if res.json().get("ok"):
+                    print(f"Отклонён: {user_id}")
+                    declined += 1
+                time.sleep(0.3)
 
-decline_all()
+    print(f"Итого отклонено: {declined}")
+
+while True:
+    decline_all()
+    time.sleep(2)
