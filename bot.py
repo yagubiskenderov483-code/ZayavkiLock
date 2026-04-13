@@ -2,7 +2,8 @@ import asyncio
 import requests
 import time
 from telethon import TelegramClient, events
-from telethon.tl.functions.messages import GetChatInviteRequestsRequest, HideChatJoinRequestRequest
+from telethon.tl.functions.channels import GetChatInviteRequestsRequest
+from telethon.tl.functions.messages import HideChatJoinRequestRequest
 from telethon.tl.types import InputPeerChannel
 
 API_ID       = 28687552
