@@ -1,11 +1,9 @@
 import requests
 import time
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = "твой_токен"
+OWNER_ID  = 8493646452
 url = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 def send_message(chat_id, text):
@@ -36,15 +34,49 @@ def decline_all(offset):
     for update in updates:
         offset = update["update_id"] + 1
 
-        # Обработка /start
+        # Обработка сообщений
         if "message" in update:
-            msg  = update["message"]
-            text = msg.get("text", "")
-            if text == "/start":
-                send_message(msg["chat"]["id"], "✅ Бот работает! Автоматически отклоняю заявки в группу.")
-                print("Получена команда /start")
+            msg     = update["message"]
+            text    = msg.get("text", "")
+            user_id = msg["from"]["id"]
+            chat_id = msg["chat"]["id"]
 
-        # Отклонение заявок
+            # Проверка доступа
+            if user_id != OWNER_ID:
+                send_message(chat_id, "⛔ У вас нет доступа к этому боту.")
+                continue
+
+            if text == "/start":
+                send_message(chat_id, (
+                    "👋 Привет! Я бот для отклонения заявок.\n\n"
+                    "Команды:\n"
+                    "/link — получить ссылку-приглашение\n"
+                    "/decline — отклонить все текущие заявки\n"
+                    "/auto — включить авторежим (отклонять автоматически)"
+                ))
+
+            elif text == "/link":
+                # Нужен chat_id группы — отправь /setgroup <chat_id> сначала
+                send_message(chat_id, "Используй /setgroup <chat_id> чтобы указать группу, затем /link")
+
+            elif text.startswith("/setgroup"):
+                parts = text.split()
+                if len(parts) == 2:
+                    group_id = parts[1]
+                    # Генерируем ссылку
+                    res = requests.post(f"{url}/createChatInviteLink", json={
+                        "chat_id": int(group_id),
+                        "creates_join_request": True,
+                    })
+                    if res.json().get("ok"):
+                        invite_link = res.json()["result"]["invite_link"]
+                        send_message(chat_id, f"🔗 Ссылка с заявками:\n{invite_link}")
+                    else:
+                        send_message(chat_id, f"Ошибка: {res.json()}")
+                else:
+                    send_message(chat_id, "Формат: /setgroup -100xxxxxxxxxx")
+
+        # Автоотклонение заявок
         if "chat_join_request" in update:
             user_id = update["chat_join_request"]["from"]["id"]
             chat_id = update["chat_join_request"]["chat"]["id"]
@@ -64,7 +96,6 @@ def decline_all(offset):
 
     return offset, declined
 
-# Запуск
 delete_webhook()
 print("Бот запущен. Жду заявки...")
 
